@@ -17,6 +17,7 @@ to setup
     set xcor -15 + random 30
     set ycor -5 + random 10
     ]
+    set carry? false
     ]
 
   create-crates number-crates [;create crates and place them
@@ -60,23 +61,31 @@ to create-rooms-and-roads
 end
 
 to move ;worker move
+   if carry? = false [
   rt random 50
   lt random 50
   fd 1
+  ]
+  if carry? = true [
+
+
+  ]
 end
 
 to pick-crate
   let near-crate one-of crates
-  if near-crate != nobody AND near-crate color = green [
+  if near-crate != nobody [
     set carry? true
-    ask near-crate[
-      move-with]
+
   ]
 end
 
 to drop-crate
-  if xcor
-
+  if carry? = true [
+  if xcor = deliveryx AND xcor = deliveryy [
+    set carry? false
+  ]
+  ]
 end
 
 
@@ -158,6 +167,23 @@ number-crates
 1
 NIL
 HORIZONTAL
+
+BUTTON
+97
+34
+160
+67
+NIL
+Go
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
 
 @#$#@#$#@
 ## WHAT IS IT?
