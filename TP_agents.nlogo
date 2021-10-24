@@ -1,6 +1,6 @@
 breed [workers worker]
 breed [crates crate]
-workers-own [carry?]
+workers-own [carried-crate]
 crates-own [deliveryx deliveryy]
 
 to setup
@@ -40,7 +40,7 @@ end
 to go
   ;if tidy-crates [ stop ]
   ask workers
-  [ move
+  [ search-crate
     pick-crate
     drop-crate
   ]
@@ -61,7 +61,7 @@ to create-rooms-and-roads
 end
 
 to move ;worker move
-   if carry? = false [
+   if carried-crate == nobody [
   rt random 50
   lt random 50
   fd 1
@@ -72,6 +72,10 @@ to move ;worker move
   ]
 end
 
+to ship-crate
+  [if carried-crate != nobody
+    let destination
+    [ask crate
 to pick-crate
   let near-crate one-of crates
   if near-crate != nobody [
@@ -527,7 +531,7 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.2.0
+NetLogo 6.2.1
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
