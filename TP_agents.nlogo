@@ -1,7 +1,8 @@
 breed [workers worker]
 breed [crates crate]
+breed [spots spot]
 workers-own [carried-crate]
-crates-own [deliveryx deliveryy]
+crates-own [carried? delivery-spot]
 
 to setup
   clear-all
@@ -9,13 +10,14 @@ to setup
   create-obstacles
   set-default-shape workers "person"
   set-default-shape crates "box"
+  set-default-shape spots "x"
 
   create-workers number-workers [;create and place the humans
     set color blue
-    set xcor 0 + random dim-room + dim-room + dim-road
+    set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
     while [(pcolor = black) OR (pcolor != white)][ ;rerun if out of the corridor or in an obstacle or one on the other
-    set xcor 0 + random dim-room + dim-room + dim-road
+    set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
     ]
     set carried-crate nobody
@@ -23,16 +25,23 @@ to setup
 
   create-crates number-crates [;create crates and place them
     set color green
-    set xcor -15 + random 30
-    set ycor -5 + random 10
-    set deliveryx -15 + random 20
-    set deliveryy -5 + random 10
-    while [(xcor > dim-room AND xcor < dim-room + dim-road) OR (deliveryx > dim-room AND deliveryx < dim-room + dim-road) OR (pcolor != white)] [ ;rerun if in the corridor or in an obstacle on one on the other
-    set xcor -15 + random 30
-    set ycor -5 + random 10
-    set deliveryx -15 + random 30
-    set deliveryy -5 + random 10
-    ]
+    set carried? FALSE
+    set xcor 0 + random (dim-room + dim-room + dim-road)
+    set ycor 0 + random dim-room
+    while [(xcor > dim-room AND xcor < (dim-room + dim-road)) OR (pcolor != white)] [ ;rerun if in the corridor or in an obstacle on one on the other
+    set xcor 0 + random (dim-room + dim-room + dim-road)
+    set ycor 0 + random dim-room
+  ]
+  ]
+
+  create-spots number-crates [;create spots and place them
+    set color yellow
+    set xcor 0 + random (dim-room + dim-room + dim-road)
+    set ycor 0 + random dim-room
+    while [(xcor > dim-room AND xcor < (dim-room + dim-road)) OR (pcolor != white)] [ ;rerun if in the corridor or in an obstacle on one on the other
+    set xcor 0 + random (dim-room + dim-room + dim-road)
+    set ycor 0 + random dim-room
+  ]
   ]
 
 
@@ -43,6 +52,18 @@ to go
   ;if tidy-crates [ stop ]
   ask workers
   [
+     ifelse carried-crate = nobody
+      [search-for-crate]
+      [if FALSE [
+      drop-crate]
+      ]
+    ;Move commands
+    ifelse [pcolor] of patch-ahead 1 = black
+      [ lt random-float 360 ]   ;; We see a black patch in front of us. Turn a random amount.
+      [ fd 1 ]                  ;; Otherwise, it is safe to move forward.
+  if carried-crate != nobody
+  [ask carried-crate [move-to myself]
+    ]
   ]
   tick
 end
@@ -71,7 +92,24 @@ to create-obstacles;create obstacles and place them
 end
 
 
-to move ;worker move
+to search-for-crate ;worker move
+  set carried-crate one-of crates-here with [color = green AND carried? = FALSE]
+  if (carried-crate != nobody)
+  [
+    ask carried-crate [set carried? TRUE]
+    create-link-to carried-crate
+  ]
+end
+
+to on-spot?
+end
+
+to drop-crate
+  if carried-crate != nobody [
+     ask carried-crate
+      [ set color red
+    set carried? FALSE]
+    set carried-crate nobody]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -155,7 +193,7 @@ BUTTON
 67
 NIL
 Go
-NIL
+T
 1
 T
 OBSERVER
