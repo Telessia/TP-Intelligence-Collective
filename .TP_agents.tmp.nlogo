@@ -14,7 +14,7 @@ to setup
     set color blue
     set xcor 0 + random dim-room + dim-room + dim-road
     set ycor 0 + random dim-room
-    while [(pcolor = black) OR (pcolor != white)][ ;rerun if out of the corridor or in an obstacle or one on the other
+    while [(pcolor = black)  (pcolor != white)][ ;rerun if out of the corridor or in an obstacle or one on the other
     set xcor 0 + random dim-room + dim-room + dim-road
     set ycor 0 + random dim-room
     ]
