@@ -67,7 +67,7 @@ to go
   if carried-crate != nobody
     [
       ask carried-crate [move-to myself]
-      if distance delivery-spot < 1 [
+      {if distance delivery-spot < 1 [
        ask myself [drop-crate]
         ]
     ]
