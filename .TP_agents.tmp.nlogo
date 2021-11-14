@@ -1,10 +1,30 @@
+extensions [profiler]
 breed [workers worker]
 breed [crates crate]
 breed [spots spot]
-workers-own [carried-crate]
+workers-own [carried-crate target awaiting? helper? helper p-valids start Final-Cost goal path]
 crates-own [carried? delivery-spot]
 
+patches-own
+[
+  father     ; Previous patch in this partial path
+  Cost-path  ; Stores the cost of the path to the current patch
+  visited?   ; has the path been visited previously? That is,
+             ; at least one path has been calculated going through this patch
+  active?    ; is the patch active? That is, we have reached it, but
+             ; we must consider it because its children have not been explored
+]
+
 to setup
+
+  ask patches
+  [
+    set father nobody
+    set Cost-path 0
+    set visited? false
+    set active? false
+  ]
+
   clear-all
   create-rooms-and-roads
   create-obstacles
@@ -14,13 +34,20 @@ to setup
 
   create-workers number-workers [;create and place the humans
     set color blue
+    set awaiting? FALSE
+    set helper? FALSE
+    set carried-crate nobody
+    set helper nobody
+    set target nobody
+    set goal nobody
+     set p-valids patches with [pcolor != black] ;Init A-Star Map
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
     while [(pcolor = black) OR (pcolor != white)][ ;rerun if out of the corridor or in an obstacle or one on the other
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
     ]
-    set carried-crate nobody
+    set start patch-here
     ]
 
 
@@ -36,6 +63,9 @@ to setup
 
   create-crates number-crates [;create crates and place them
     set color green
+    if(random(4) = 0)[
+      set color violet
+    ]
     set carried? FALSE
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
@@ -61,17 +91,19 @@ to go
       drop-crate]
       ]
     ;Move commands
-    ifelse ([pcolor] of patch-ahead 1 = black) OR any? (workers-on patch-ahead 1) ;prevent workers from going through walls or other workers
-      [ lt random-float 360 ]   ;; We see a black patch in front of us. Turn a random amount.
-      [ fd 1 ]                  ;; Otherwise, it is safe to move forward.
-  if carried-crate != nobody
-    [
-      ask carried-crate [move-to myself]
-      {if distance delivery-spot < 1 [
+     move
+      ;move-to first path
+      ;set path remove-item 0 path
+     if (helper != nobody)
+      [ask helper [face myself fd 1]
+
+      ask carried-crate [face myself fd 1
+      if distance delivery-spot < 1 [
        ask myself [drop-crate]
         ]
-    ]
+        ]]
   ]
+
   tick
 end
 
@@ -98,16 +130,132 @@ to create-obstacles;create obstacles and place them
 ]
 end
 
+to move
+   ifelse ([pcolor] of patch-ahead 1 = black) OR any? (workers-on patch-ahead 1) ;prevent workers from going through walls or other workers
+      [ lt random-float 360 ]   ;; We see a black patch in front of us. Turn a random amount.
+      [ fd 1 ]                  ;; Otherwise, it is safe to move forward.
+end
 
-to search-for-crate ;worker move
-  set carried-crate one-of crates-here with [color = green AND carried? = FALSE]
-  if (carried-crate != nobody)
+; Patch report to estimate the total expected cost of the path starting from
+; in Start, passing through it, and reaching the #Goal
+to-report Total-expected-cost [#Goal]
+  report Cost-path + Heuristic #Goal
+end
+
+; Patch report to reurtn the heuristic (expected length) from the current patch
+; to the #Goal
+to-report Heuristic [#Goal]
+  report distance #Goal
+end
+
+to-report A-star [source destination patch-grid]
+  ask p-valids with [visited?]
   [
-    ask carried-crate [set carried? TRUE]
+    set father nobody
+    set Cost-path 0
+    set visited? false
+    set active? false
+  ]
+
+   ask source
+  [
+    set father self
+    set visited? true
+    set active? true
+  ]
+  let exists? true
+
+  while [not [visited?] of destination and exists?]
+  [
+     let options p-valids with [active?]
+    ; If any
+    ifelse any? options
+    [
+      ; Take one of the active patches with minimal expected cost
+      ask min-one-of options [Total-expected-cost destination]
+      [
+        ; Store its real cost (to reach it) to compute the real cost
+        ; of its children
+        let Cost-path-father Cost-path
+        ; and deactivate it, because its children will be computed right now
+        set active? false
+        ; Compute its valid neighbors
+        let valid-neighbors neighbors with [member? self patch-grid]
+        ask valid-neighbors
+        [
+          ; There are 2 types of valid neighbors:
+          ;   - Those that have never been visited (therefore, the
+          ;       path we are building is the best for them right now)
+          ;   - Those that have been visited previously (therefore we
+          ;       must check if the path we are building is better or not,
+          ;       by comparing its expected length with the one stored in
+          ;       the patch)
+          ; One trick to work with both type uniformly is to give for the
+          ; first case an upper bound big enough to be sure that the new path
+          ; will always be smaller.
+          let t ifelse-value visited? [ Total-expected-cost destination] [2 ^ 20]
+          ; If this temporal cost is worse than the new one, we substitute the
+          ; information in the patch to store the new one (with the neighbors
+          ; of the first case, it will be always the case)
+          if t > (Cost-path-father + distance myself + Heuristic destination)
+          [
+            ; The current patch becomes the father of its neighbor in the new path
+            set father myself
+            set visited? true
+            set active? true
+            ; and store the real cost in the neighbor from the real cost of its father
+            set Cost-path Cost-path-father + distance father
+            set Final-Cost precision Cost-path 3
+          ]
+        ]
+      ]
+    ]
+    ; If there are no more options, there is no path between #Start and #Goal
+    [
+      set exists? false
+    ]
+  ]
+  ; After the searching loop, if there exists a path
+  ifelse exists?
+  [
+    ; We extract the list of patches in the path, form #Start to #Goal
+    ; by jumping back from #Goal to #Start by using the fathers of every patch
+    let current destination
+    set Final-Cost (precision [Cost-path] of destination 3)
+    let rep (list current)
+    While [current != source]
+    [
+      set current [father] of current
+      set rep fput current rep
+    ]
+    report rep
+  ]
+  [
+    ; Otherwise, there is no path, and we return False
+    report false
   ]
 end
 
-to on-spot?
+
+to search-for-crate ;worker move
+  if ((any? crates in-radius 5 with [carried? = FALSE AND color != red]) AND (target = nobody))[
+    set target one-of crates in-radius 5 with [carried? = FALSE AND color != red]
+  ]
+  set carried-crate one-of crates-here with [color != red AND carried? = FALSE]
+  if (carried-crate != nobody)
+  [
+    set target nobody
+    let x nobody
+    ask carried-crate[
+     ;set x delivery-spot
+        set carried? TRUE
+      set color yellow
+    if (color = violet)[
+      ask myself [set awaiting? TRUE
+        set color orange]
+    ]]
+    ;;set path A-star start x p-valids
+  ]
 end
 
 to drop-crate
@@ -116,14 +264,20 @@ to drop-crate
       [ set color red
     set carried? FALSE
     ]
-    set carried-crate nobody]
+    set carried-crate nobody
+    if helper != nobody[
+    ask helper [set helper? FALSE]
+    set helper nobody
+    set target nobody
+    ]
+  ]
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
 210
 10
-842
-253
+998
+279
 -1
 -1
 13.0
@@ -133,13 +287,13 @@ GRAPHICS-WINDOW
 1
 1
 0
-1
-1
+0
+0
 1
 -1
-46
+58
 -1
-16
+18
 0
 0
 1
@@ -219,7 +373,7 @@ obstacle-density
 obstacle-density
 0
 100
-60.0
+13.0
 1
 1
 NIL
@@ -234,7 +388,7 @@ dim-room
 dim-room
 0
 25
-15.0
+17.0
 1
 1
 NIL
@@ -249,7 +403,7 @@ dim-road
 dim-road
 0
 30
-15.0
+23.0
 1
 1
 NIL
