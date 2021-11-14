@@ -1,8 +1,9 @@
 extensions [profiler]
+globals [start goal p-valids Final-cost]
 breed [workers worker]
 breed [crates crate]
 breed [spots spot]
-workers-own [carried-crate target awaiting? helper? helper p-valids start Final-Cost goal path]
+workers-own [carried-crate target awaiting? helper? helper path]
 crates-own [carried? delivery-spot]
 
 patches-own
@@ -16,7 +17,6 @@ patches-own
 ]
 
 to setup
-
   ask patches
   [
     set father nobody
@@ -34,16 +34,15 @@ to setup
 
   create-workers number-workers [;create and place the humans
     set color blue
-    set awaiting? FALSE
-    set helper? FALSE
-    set carried-crate nobody
-    set helper nobody
-    set target nobody
-    set goal nobody
-     set p-valids patches with [pcolor != black] ;Init A-Star Map
+    set awaiting? FALSE ;attends pour de l'aide?
+    set helper? FALSE ;est en train d'aider?
+    set carried-crate nobody ; référence à caisse portée
+    set helper nobody ; référence au travailleur qui aide à porter la caisse si lourde
+    set target nobody ; référence à la caisse ou au travailleur vers lequel on se dirige
+    set p-valids patches with [pcolor != black] ;Init A-Star Map
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
-    while [(pcolor = black) OR (pcolor != white)][ ;rerun if out of the corridor or in an obstacle or one on the other
+    while [(pcolor = black) OR (pcolor != white)][ ;relance si dans le couloir, hors de la carte ou sur un autre travailleur
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
     ]
@@ -51,19 +50,20 @@ to setup
     ]
 
 
-  create-spots number-crates [;create spots and place them
+  create-spots number-crates [; créé les points de livraisons
     set color yellow
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
-    while [(xcor > dim-room AND xcor < (dim-room + dim-road)) OR (pcolor != white)] [ ;rerun if in the corridor or in an obstacle on one on the other
+    while [(xcor > dim-room AND xcor < (dim-room + dim-road)) OR (pcolor != white)] [ ;relance si dans le couloir, hors de la carte ou sur un autre point
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
   ]
   ]
 
-  create-crates number-crates [;create crates and place them
+  create-crates number-crates [;créer les caisses et les places
     set color green
-    if(random(4) = 0)[
+    if random-float 100 < heavy-crates-ratio
+    [
       set color violet
     ]
     set carried? FALSE
@@ -76,34 +76,82 @@ to setup
     set delivery-spot max-one-of spots [distance myself]
     create-link-to delivery-spot
   ]
-
-
-  reset-ticks
+    reset-ticks
 end
 
 to go
-  ;if tidy-crates [ stop ]
+  while [count crates with [color != red] > 0][ ;condition d'arrêt
+
+    if ticks > 500 [
+      reset-ticks
+      stop]
+
   ask workers
   [
-     ifelse carried-crate = nobody
-      [search-for-crate]
-      [if FALSE [
-      drop-crate]
+      if (awaiting? = FALSE AND helper? = FALSE)[ ;si le travailleur n'est pas en attente ou aide un autre travailleur
+
+
+    if target != nobody
+    [ask target
+    [ifelse (is-crate? self) = TRUE
+          [ifelse carried? = TRUE
+        [
+          ask myself [set target nobody]
+        ]
+        [
+          ask myself [face target
+                  move-to item 0 path
+                  set path remove-item 0 path]
+        ]
       ]
-    ;Move commands
-    ifelse ([pcolor] of patch-ahead 1 = black) OR any? (workers-on patch-ahead 1) ;prevent workers from going through walls or other workers
-      [ lt random-float 360 ]   ;; We see a black patch in front of us. Turn a random amount.
-      [ fd 1 ]                  ;; Otherwise, it is safe to move forward.
-  if carried-crate != nobody
-    [
+        [if (is-worker? self) = TRUE
+          [ifelse awaiting? = FALSE
+            [
+          ask myself [set target nobody]
+        ]
+        [
+          ask myself [face target
+      move-to item 0 path
+      set path remove-item 0 path
+            if distance target < 1 [
+                      set helper? TRUE
+                      ask target [set helper myself
+                        set awaiting? FALSE]
+                  ]
+                  ]
+        ]
+          ]
+      ]
+    ]
+
+        ]
+
+        if target = nobody AND carried-crate = nobody
+        [move
+        search-target
+        ]
+
+     if carried-crate = nobody
+        [pick-crate]
+    ;Move commands]
+     if carried-crate != nobody
+        [
+          if helper != nobody
+          [ask helper [face myself fd 1]]
+      move-to item 0 path
+      set path remove-item 0 path
       ask carried-crate [move-to myself
       if distance delivery-spot < 1 [
        ask myself [drop-crate]
+      ]
+          ]
         ]
       ]
-    ]
   ]
-  tick
+   tick
+  ]
+  user-message (word "All crates are at destination")
+  stop
 end
 
 to create-rooms-and-roads
@@ -123,7 +171,7 @@ end
 to create-obstacles;create obstacles and place them
      ask patches[
         if pcolor = white [
-          if random-float 500 < obstacle-density
+          if random-float 100 < obstacle-density
           [set pcolor black]
     ]
 ]
@@ -148,7 +196,7 @@ to-report Heuristic [#Goal]
 end
 
 to-report A-star [source destination patch-grid]
-  ask p-valids with [visited?]
+  ask patch-grid with [visited? = TRUE]
   [
     set father nobody
     set Cost-path 0
@@ -164,9 +212,9 @@ to-report A-star [source destination patch-grid]
   ]
   let exists? true
 
-  while [not [visited?] of destination and exists?]
+  while [not [visited? = TRUE] of destination and exists?]
   [
-     let options p-valids with [active?]
+     let options patch-grid with [active? = true]
     ; If any
     ifelse any? options
     [
@@ -192,7 +240,7 @@ to-report A-star [source destination patch-grid]
           ; One trick to work with both type uniformly is to give for the
           ; first case an upper bound big enough to be sure that the new path
           ; will always be smaller.
-          let t ifelse-value visited? [ Total-expected-cost destination] [2 ^ 20]
+          let t ifelse-value visited? = TRUE [ Total-expected-cost destination] [2 ^ 20]
           ; If this temporal cost is worse than the new one, we substitute the
           ; information in the patch to store the new one (with the neighbors
           ; of the first case, it will be always the case)
@@ -235,29 +283,38 @@ to-report A-star [source destination patch-grid]
   ]
 end
 
-
-to search-for-crate ;worker move
+to search-target
+  if (any? workers in-radius 5 with [awaiting? = TRUE])[
+    set target one-of workers in-radius 5 with [awaiting? = TRUE]
+     set start patch-here
+    set path A-star start target p-valids ; si cible trouvée, lance une génération de A*
+    ]
   if ((any? crates in-radius 5 with [carried? = FALSE AND color != red]) AND (target = nobody))[
     set target one-of crates in-radius 5 with [carried? = FALSE AND color != red]
+     set start patch-here
+    set path A-star start target p-valids ; si cible trouvée, lance une génération de A*
   ]
+end
+
+to pick-crate ; Cherche une cible ou essaie de ramasser une caisse à ses pieds
+
   set carried-crate one-of crates-here with [color != red AND carried? = FALSE]
   if (carried-crate != nobody)
   [
     set target nobody
     let x nobody
     ask carried-crate[
-     ;set x delivery-spot
+     set x delivery-spot
         set carried? TRUE
-      set color yellow
     if (color = violet)[
-      ask myself [set awaiting? TRUE
-        set color orange]
+      ask myself [set awaiting? TRUE]
     ]]
-    ;;set path A-star start x p-valids
+    set start patch-here
+    set path A-star start x p-valids ; si caisse ramassée, lance une génération de A*
   ]
 end
 
-to drop-crate
+to drop-crate ;;dépose la caisse au sol
   if carried-crate != nobody [
      ask carried-crate
       [ set color red
@@ -265,7 +322,7 @@ to drop-crate
     ]
     set carried-crate nobody
     if helper != nobody[
-    ask helper [set helper? FALSE]
+    ask helper [set helper? FALSE] ; laisse le travailleur aidant retourne à son travail
     set helper nobody
     set target nobody
     ]
@@ -293,8 +350,8 @@ GRAPHICS-WINDOW
 58
 -1
 18
-0
-0
+1
+1
 1
 ticks
 30.0
@@ -353,7 +410,7 @@ BUTTON
 67
 NIL
 Go
-T
+NIL
 1
 T
 OBSERVER
@@ -371,8 +428,8 @@ SLIDER
 obstacle-density
 obstacle-density
 0
-100
-13.0
+80
+11.0
 1
 1
 NIL
@@ -403,6 +460,21 @@ dim-road
 0
 30
 23.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+33
+276
+205
+309
+heavy-crates-ratio
+heavy-crates-ratio
+0
+100
+45.0
 1
 1
 NIL
