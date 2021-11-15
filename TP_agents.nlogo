@@ -8,19 +8,18 @@ crates-own [carried? delivery-spot]
 
 patches-own
 [
-  father     ; Previous patch in this partial path
-  Cost-path  ; Stores the cost of the path to the current patch
-  visited?   ; has the path been visited previously? That is,
-             ; at least one path has been calculated going through this patch
-  active?    ; is the patch active? That is, we have reached it, but
-             ; we must consider it because its children have not been explored
+  father     ; père du patch dans le chemin actuel
+  g  ; longueur du chemin actuel au niveau de ce patch équivalent -> fonction g() dans f() = g() + h()
+  visited?   ; On est déjà passé ici, le patch appartient à au moins 1 chemin
+  active?    ; Le patch est actuellement celui auquel on s'interesse
+
 ]
 
 to setup
   ask patches
   [
     set father nobody
-    set Cost-path 0
+    set g 0
     set visited? false
     set active? false
   ]
@@ -34,14 +33,14 @@ to setup
 
   set l-targets [[]]
 
-  create-workers number-workers [;create and place the humans
+  create-workers number-workers [;Créer et place les travailleurs
     set color blue
     set awaiting? FALSE ;attends pour de l'aide?
     set helper? FALSE ;est en train d'aider?
     set carried-crate nobody ; référence à caisse portée
     set helper nobody ; référence au travailleur qui aide à porter la caisse si lourde
     set target nobody ; référence à la caisse ou au travailleur vers lequel on se dirige
-    set p-valids patches with [pcolor != black] ;Init A-Star Map
+    set p-valids patches with [pcolor != black] ;Initialise les possibilités pour les différentes générations de A*
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
     while [(pcolor = black) OR (pcolor != white)][ ;relance si dans le couloir, hors de la carte ou sur un autre travailleur
@@ -52,7 +51,7 @@ to setup
     ]
 
 
-  create-spots number-crates [; créé les points de livraisons
+  create-spots number-crates [; créer et place les points de livraisons
     set color yellow
     set xcor 0 + random (dim-room + dim-room + dim-road)
     set ycor 0 + random dim-room
@@ -62,7 +61,7 @@ to setup
   ]
   ]
 
-  create-crates number-crates [;créer les caisses et les places
+  create-crates number-crates [;créer et place les caisses
     set color green
     if random-float 100 < heavy-crates-ratio
     [
@@ -82,7 +81,7 @@ to setup
 end
 
 to go
-  while [count crates with [color != red] > 0][ ;condition d'arrêt
+  while [count crates with [color != red] > 0][ ;condition d'arrêt si toute les caisses à destination
 
     if ticks > 500 [
       reset-ticks
@@ -137,7 +136,7 @@ to go
 
      if carried-crate = nobody
         [pick-crate]
-    ;Move commands]
+
      if carried-crate != nobody
         [
           if helper != nobody
@@ -172,7 +171,7 @@ to create-rooms-and-roads
   ] ]
 end
 
-to create-obstacles;create obstacles and place them
+to create-obstacles;créer et place les obstacles
      ask patches[
         if pcolor = white [
           if random-float 100 < obstacle-density
@@ -182,28 +181,29 @@ to create-obstacles;create obstacles and place them
 end
 
 to move
-   ifelse ([pcolor] of patch-ahead 1 = black) OR any? (workers-on patch-ahead 1) ;prevent workers from going through walls or other workers
-      [ lt random-float 360 ]   ;; We see a black patch in front of us. Turn a random amount.
-      [ fd 1 ]                  ;; Otherwise, it is safe to move forward.
+   ifelse ([pcolor] of patch-ahead 1 = black) OR any? (workers-on patch-ahead 1) ;si on detecte un mur ou un autre travailleurs juste en face
+      [ lt random-float 360 ]   ;; Si on rencontre un obstacle on Effectue une rotation aléatoire
+      [ fd 1 ]                  ;; Sinon on fait un pas en avant
 end
 
-; Patch report to estimate the total expected cost of the path starting from
-; in Start, passing through it, and reaching the #Goal
-to-report Total-expected-cost [#Goal]
-  report Cost-path + Heuristic #Goal
+; Fonction f() =  g() - longueur du chemin depuis le début + h() - distance restante jusqu'à la destination
+to-report f [xgoal]
+  report g + h xgoal
 end
 
-; Patch report to reurtn the heuristic (expected length) from the current patch
-; to the #Goal
-to-report Heuristic [#Goal]
-  report distance #Goal
+; Fonction h (distance restante jusqu'au but suivant l'heuristique "distance" de NetLogo
+to-report h [xgoal]
+  report distance xgoal
 end
 
+; Algorithme A* par fsancho http://www.cs.us.es/~fsancho/?e=131
+; ici on se moque de savoir si un chemin existe, s'il n'existe pas c'est
+; que la génération est mauvaise, on peut donc laisser l'algo planter
 to-report A-star [source destination patch-grid]
   ask patch-grid with [visited? = TRUE]
   [
     set father nobody
-    set Cost-path 0
+    set g 0
     set visited? false
     set active? false
   ]
@@ -216,21 +216,21 @@ to-report A-star [source destination patch-grid]
   ]
   let exists? true
 
-  while [not [visited? = TRUE] of destination and exists?]
+  while [not [visited? = TRUE] of destination]
   [
      let options patch-grid with [active? = true]
-    ; If any
-    ifelse any? options
+    ; s'il y a d'autres possibilités sur le chemin
+    if any? options
     [
-      ; Take one of the active patches with minimal expected cost
-      ask min-one-of options [Total-expected-cost destination]
+      ; Calcul tout les couts des options et choisie le moins "cher"
+      ask min-one-of options [f destination]
       [
-        ; Store its real cost (to reach it) to compute the real cost
-        ; of its children
-        let Cost-path-father Cost-path
-        ; and deactivate it, because its children will be computed right now
+        ; Garde en mémoire le cout actuel du père pour pouvoir calculer celui des enfants
+        let Cost-path-father g
+        ; il n'est plus marqué comme actif vu qu'on s'interesse à ses enfants
         set active? false
-        ; Compute its valid neighbors
+        ; On regarder les voisins du patch actuel
+        ;"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
         let valid-neighbors neighbors with [member? self patch-grid]
         ask valid-neighbors
         [
@@ -244,50 +244,38 @@ to-report A-star [source destination patch-grid]
           ; One trick to work with both type uniformly is to give for the
           ; first case an upper bound big enough to be sure that the new path
           ; will always be smaller.
-          let t ifelse-value visited? = TRUE [ Total-expected-cost destination] [2 ^ 20]
+          let t ifelse-value visited? = TRUE [ f destination] [2 ^ 20]
           ; If this temporal cost is worse than the new one, we substitute the
           ; information in the patch to store the new one (with the neighbors
           ; of the first case, it will be always the case)
-          if t > (Cost-path-father + distance myself + Heuristic destination)
+          if t > (Cost-path-father + distance myself + h destination)
           [
             ; The current patch becomes the father of its neighbor in the new path
             set father myself
             set visited? true
             set active? true
             ; and store the real cost in the neighbor from the real cost of its father
-            set Cost-path Cost-path-father + distance father
-            set Final-Cost precision Cost-path 3
+            set g Cost-path-father + distance father
+            set Final-Cost precision g 3
           ]
-        ]
+          ;"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
       ]
     ]
-    ; If there are no more options, there is no path between #Start and #Goal
-    [
-      set exists? false
-    ]
   ]
-  ; After the searching loop, if there exists a path
-  ifelse exists?
-  [
-    ; We extract the list of patches in the path, form #Start to #Goal
-    ; by jumping back from #Goal to #Start by using the fathers of every patch
+  ]
+    ; On transfert le patches du path de source à destination
     let current destination
-    set Final-Cost (precision [Cost-path] of destination 3)
-    let rep (list current)
+    set Final-Cost (precision [g] of destination 3)
+    let final-path (list current)
     While [current != source]
     [
       set current [father] of current
-      set rep fput current rep
+      set final-path fput current final-path
     ]
-    report rep
-  ]
-  [
-    ; Otherwise, there is no path, and we return False
-    report false
-  ]
+    report final-path
 end
 
-to look-around ;;give infos to other workers
+to look-around ;Regarde autour de lui et rapporte l'info aux autres par talkie ou téléphone
   if (item 0 l-targets) = [[]] [
     set l-targets remove-item 0 l-targets]
   if ((any? crates in-radius 5 with [carried? = FALSE AND color != red]))[
@@ -295,7 +283,7 @@ to look-around ;;give infos to other workers
   ]
 end
 
-to search-target
+to search-target ;;cherche une cible vers laquelle se diriger, soit dans le pool des cibles, s'il est vide on cherche a vue.
   if (not empty? l-targets) AND (item 0 l-targets != [])
   [
     print l-targets
@@ -311,7 +299,7 @@ to search-target
   ]
 end
 
-to pick-crate ; Cherche une cible ou essaie de ramasser une caisse à ses pieds
+to pick-crate ; Essaie de ramasser une caisse à ses pieds
 
   set carried-crate one-of crates-here with [color != red AND carried? = FALSE]
   if (carried-crate != nobody)
@@ -325,7 +313,7 @@ to pick-crate ; Cherche une cible ou essaie de ramasser une caisse à ses pieds
      set x delivery-spot
         set carried? TRUE
     if (color = violet)[
-      ask myself [set awaiting? TRUE
+      ask myself [set awaiting? TRUE ;caisse trop lourde, se mets en attente
           if item 0 l-targets = [[]] [
           set l-targets remove-item 0 l-targets]
         set l-targets fput self l-targets] ;;prévient les autres travailleurs qu'une caisse lourde est trouvée
@@ -343,7 +331,7 @@ to drop-crate ;;dépose la caisse au sol
     ]
     set carried-crate nobody
     if helper != nobody[
-    ask helper [set helper? FALSE] ; laisse le travailleur aidant retourne à son travail
+    ask helper [set helper? FALSE] ; laisse le travailleur aidant retourner à son travail
     set helper nobody
     set target nobody
     ]
