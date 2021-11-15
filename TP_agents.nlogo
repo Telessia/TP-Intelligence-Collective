@@ -1,5 +1,5 @@
 extensions [profiler]
-globals [start goal p-valids Final-cost]
+globals [start goal p-valids l-targets Final-cost]
 breed [workers worker]
 breed [crates crate]
 breed [spots spot]
@@ -31,6 +31,8 @@ to setup
   set-default-shape workers "person"
   set-default-shape crates "box"
   set-default-shape spots "x"
+
+  set l-targets [[]]
 
   create-workers number-workers [;create and place the humans
     set color blue
@@ -101,7 +103,8 @@ to go
         [
           ask myself [face target
                   move-to item 0 path
-                  set path remove-item 0 path]
+                  set path remove-item 0 path
+                look-around]
         ]
       ]
         [if (is-worker? self) = TRUE
@@ -113,6 +116,7 @@ to go
           ask myself [face target
       move-to item 0 path
       set path remove-item 0 path
+                    look-around
             if distance target < 1 [
                       set helper? TRUE
                       ask target [set helper myself
@@ -283,12 +287,23 @@ to-report A-star [source destination patch-grid]
   ]
 end
 
+to look-around ;;give infos to other workers
+  if (item 0 l-targets) = [[]] [
+    set l-targets remove-item 0 l-targets]
+  if ((any? crates in-radius 5 with [carried? = FALSE AND color != red]))[
+    set l-targets fput one-of crates in-radius 5 with [carried? = FALSE AND color != red] l-targets
+  ]
+end
+
 to search-target
-  if (any? workers in-radius 5 with [awaiting? = TRUE])[
-    set target one-of workers in-radius 5 with [awaiting? = TRUE]
-     set start patch-here
+  if (not empty? l-targets) AND (item 0 l-targets != [])
+  [
+    print l-targets
+    set target item 0 l-targets
+    set l-targets remove-item 0 l-targets
+    set start patch-here
     set path A-star start target p-valids ; si cible trouvée, lance une génération de A*
-    ]
+  ]
   if ((any? crates in-radius 5 with [carried? = FALSE AND color != red]) AND (target = nobody))[
     set target one-of crates in-radius 5 with [carried? = FALSE AND color != red]
      set start patch-here
@@ -303,11 +318,17 @@ to pick-crate ; Cherche une cible ou essaie de ramasser une caisse à ses pieds
   [
     set target nobody
     let x nobody
+    if member? carried-crate l-targets[
+        set l-targets remove carried-crate l-targets
+      ]
     ask carried-crate[
      set x delivery-spot
         set carried? TRUE
     if (color = violet)[
-      ask myself [set awaiting? TRUE]
+      ask myself [set awaiting? TRUE
+          if item 0 l-targets = [[]] [
+          set l-targets remove-item 0 l-targets]
+        set l-targets fput self l-targets] ;;prévient les autres travailleurs qu'une caisse lourde est trouvée
     ]]
     set start patch-here
     set path A-star start x p-valids ; si caisse ramassée, lance une génération de A*
